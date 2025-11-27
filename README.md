@@ -22,5 +22,9 @@ Thresholds can be configured using environment variables.
 
 >  docker compose up --build
 
+**Attention: sometimes Kafka starts to soon and cannot connect to Zookeper. In that case please stop Zookeper and Kafka. 
+Then first start Zookeper. After 10 seconds start Kafka.**
+
 2) mock sencor request by sending commands to warehouse_service. Command example:
 > '{"sensor_id": "t1", "value": 10}' | nc -u -w1 localhost 3344'
+
