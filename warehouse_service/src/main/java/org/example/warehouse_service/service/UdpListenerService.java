@@ -1,14 +1,12 @@
 package org.example.warehouse_service.service;
 
-import com.fasterxml.jackson.core.exc.StreamReadException;
-import com.fasterxml.jackson.databind.DatabindException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import lombok.val;
 import org.example.warehouse_service.model.SensorMeasurement;
 import org.example.warehouse_service.model.WarehouseMeasurement;
+import org.example.warehouse_service.util.UpdMessageProcessor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -18,7 +16,10 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.DatagramChannel;
-import java.util.concurrent.*;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static java.util.concurrent.Executors.newSingleThreadExecutor;
 import static java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor;
@@ -32,13 +33,6 @@ public class UdpListenerService implements SmartLifecycle {
 
     private volatile boolean running = false;
 
-    private final KafkaTemplate<String, WarehouseMeasurement> kafkaTemplate;
-
-    private final ObjectMapper objectMapper;
-
-    @Value(value = "${kafka.topic}")
-    private String topic;
-
     private ExecutorService temperatureListener;
 
     private ExecutorService humidityListener;
@@ -47,13 +41,16 @@ public class UdpListenerService implements SmartLifecycle {
 
     private final BlockingQueue<byte[]> queue = new LinkedBlockingQueue<>(1000);
 
-    private String warehouseId ;
+    private final KafkaPublisherService kafkaPublisherService;
 
+    private final ObjectMapper objectMapper;
 
     @Override
     public void start() {
         running = true;
-        warehouseId = Integer.toString(ThreadLocalRandom.current().nextInt(100));
+
+        val warehouseId = Integer.toString(ThreadLocalRandom.current().nextInt(100));
+        val messageProcessor = new UpdMessageProcessor(kafkaPublisherService, queue, objectMapper, warehouseId);
 
         temperatureListener = newSingleThreadExecutor(Thread.ofVirtual().factory());
         temperatureListener.submit(() -> portListener(3344));
@@ -62,7 +59,9 @@ public class UdpListenerService implements SmartLifecycle {
         humidityListener.submit(() -> portListener(3355));
 
         workerExecutor = newVirtualThreadPerTaskExecutor();
-        workerExecutor.submit(this::workerTask);
+        workerExecutor.submit(messageProcessor::process);
+
+        System.out.println("listeners started.");
     }
 
     @Override
@@ -73,7 +72,7 @@ public class UdpListenerService implements SmartLifecycle {
         shutdownExecutor(humidityListener);
         shutdownExecutor(workerExecutor);
 
-        System.out.println("UdpKafkaBridge stopped.");
+        System.out.println("listeners stopped.");
     }
 
     @Override
@@ -103,22 +102,6 @@ public class UdpListenerService implements SmartLifecycle {
         }
     }
 
-    private void workerTask() {
-        while (true) {
-            try {
-                val rawData = queue.take();
-                val sensorData = objectMapper.readValue(rawData, SensorMeasurement.class);
-                val warehouseData = new WarehouseMeasurement(sensorData, warehouseId);
-                log.info(warehouseData.toString());
-                kafkaTemplate.send(topic, warehouseData);
-
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-
-        }
-    }
-
     public static void shutdownExecutor(ExecutorService ex) {
         ex.shutdown();
         try {
@@ -129,8 +112,5 @@ public class UdpListenerService implements SmartLifecycle {
             ex.shutdownNow();
         }
     }
-
-
-
 }
 
