@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class ConsoleAlertService implements AlertService {
     private final SensorProps sensorProps;
+    private final MeasurementLoggerService measurementLoggerService;
 
     @Override
     public void monitor(WarehouseMeasurement measurement) {
@@ -20,10 +21,10 @@ public class ConsoleAlertService implements AlertService {
         val thresholdValue = sensorProps.getThreshold()
                 .get(sensorType);
 
-        if (thresholdValue != null && thresholdValue.compareTo(sensorValue) > 0) {
-            log.error("Threshold crossed!. Measurement: {}, threshold: {}", measurement, thresholdValue);
+        if (thresholdValue != null && thresholdValue.compareTo(sensorValue) < 0) {
+            measurementLoggerService.printError(String.format("Threshold crossed!. Measurement: %s, threshold: %d", measurement, thresholdValue));
         } else {
-            log.info("Measurement ok: {}, threshold: {}", measurement, thresholdValue);
+            measurementLoggerService.printMessage(String.format("Measurement ok: %s, threshold: %d", measurement, thresholdValue));
         }
     }
 }
